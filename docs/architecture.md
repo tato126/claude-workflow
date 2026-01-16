@@ -4,32 +4,27 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                        Web UI (Next.js)                     │
-│  - 프로젝트 관리                                              │
-│  - 태스크 CRUD                                               │
-│  - 실시간 로그 뷰어                                           │
-│  - 칸반 보드                                                 │
+│                      Jira Cloud                             │
+│  - 이슈 생성/관리                                             │
+│  - 커스텀 필드 (prompt, skill, projectPath)                   │
+│  - 워크플로우 상태 관리                                        │
 └─────────────────────┬───────────────────────────────────────┘
-                      │ HTTP API
+                      │ REST API (polling 10s)
                       ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                      Daemon (Node.js)                       │
 │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐   │
-│  │  Queue   │  │ Executor │  │Validator │  │Changelog │   │
-│  │ Manager  │→ │          │→ │          │→ │ Generator│   │
+│  │  Jira    │  │ Executor │  │Validator │  │  Jira    │   │
+│  │  Poller  │→ │          │→ │          │→ │ Updater  │   │
 │  └──────────┘  └──────────┘  └──────────┘  └──────────┘   │
-│        ↑                                                    │
-│        │ Polling (5s)                                       │
-└────────┼────────────────────────────────────────────────────┘
-         │
-┌────────┴────────────────────────────────────────────────────┐
-│                     Data Layer                              │
-│  ~/.claude/workflow/data/                                   │
-│    ├── config.json      # 데몬 설정                          │
-│    └── registry.json    # 프로젝트 목록                       │
-│                                                             │
-│  project/.claude/tasks/                                     │
-│    └── queue.json       # 태스크 큐 (프로젝트별)               │
+└─────────────────────────────────────────────────────────────┘
+                      │
+                      ▼
+┌─────────────────────────────────────────────────────────────┐
+│                   Target Project                            │
+│  - Claude Code 실행                                          │
+│  - 빌드/테스트 검증                                           │
+│  - 로그 저장                                                 │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -39,9 +34,14 @@
 
 싱글톤 백그라운드 프로세스. Lock 파일로 중복 실행 방지.
 
-**모듈:**
-- `index.ts` - 메인 루프, 시그널 핸들링
-- `queue.ts` - 큐 읽기/쓰기, 상태 업데이트
+**Jira 모듈:**
+- `jira/poller.ts` - Jira 이슈 polling, "To claude" 상태 감지
+- `jira/mapper.ts` - Jira 이슈 → 내부 태스크 변환
+- `jira/updater.ts` - 실행 결과 Jira에 업데이트
+- `jira/comment-builder.ts` - Jira 댓글 포맷팅
+- `jira/client.ts` - Jira REST API 클라이언트
+
+**실행 모듈:**
 - `executor.ts` - Claude Code 실행, 실시간 로그 스트리밍
 - `validator.ts` - 프로젝트 감지, 빌드/테스트 실행
 - `changelog.ts` - 문서 자동 생성
@@ -50,48 +50,36 @@
 
 **실행 흐름:**
 ```
-1. pollInterval(5s)마다 getAllTodoTasks() 호출
-2. todo 태스크 발견 시:
-   - status → progress
-   - executeTask() - Claude Code 실행
-   - validateTask() - 빌드/테스트/리뷰
-   - generateChangelog() - 문서 생성
-   - status → review/done/failed
-3. 알림 전송
+1. pollInterval(10s)마다 Jira API 호출
+2. "To claude" 상태 이슈 발견 시:
+   - Jira 상태 → "In Progress"
+   - Claude Code 실행
+   - 빌드/테스트 검증
+   - 문서 생성
+   - Jira 상태 → "In review" / "Done"
+   - Jira 댓글로 결과 보고
+3. macOS 알림 전송
 ```
-
-### Web UI
-
-Next.js 14 App Router 기반 대시보드.
-
-**주요 컴포넌트:**
-- `Dashboard` - 메인 칸반 보드
-- `TaskForm` - 태스크 생성 폼
-- `TaskCard` - 태스크 카드 (드래그 지원)
-- `TaskDetailModal` - 상세 보기, 실시간 로그
-
-**API Routes:**
-- `GET/POST /api/tasks` - 태스크 CRUD
-- `PATCH /api/tasks/[id]` - 상태 변경
-- `GET /api/tasks/logs` - 실시간 로그
-- `GET /api/daemon` - 데몬 상태
-- `GET/POST /api/projects` - 프로젝트 관리
 
 ### 데이터 흐름
 
 ```
-[Web UI] ──POST /api/tasks──→ [queue.json] ←──polling── [Daemon]
-                                   │
-                                   ▼
-                           Claude Code 실행
-                                   │
-                                   ▼
-                         프로젝트 자동 검증
-                                   │
-              ┌────────────────────┼────────────────────┐
-              ▼                    ▼                    ▼
-         docs/tasks/          docs/daily/         docs/failed/
-         (성공 태스크)          (일별 작업)          (실패 태스크)
+[Jira Issue]
+     │
+     │ "To claude" 상태
+     ▼
+[Poller] ──→ [Mapper] ──→ [Executor] ──→ [Validator]
+                               │              │
+                               ▼              ▼
+                          Claude Code    Build/Test
+                               │              │
+                               └──────┬───────┘
+                                      ▼
+                               [Jira Updater]
+                                      │
+                        ┌─────────────┼─────────────┐
+                        ▼             ▼             ▼
+                    상태 변경      댓글 추가     문서 생성
 ```
 
 ## 파일 시스템 구조
@@ -104,15 +92,15 @@ Next.js 14 App Router 기반 대시보드.
 ├── daemon.log           # 데몬 로그
 ├── start.sh             # 시작 스크립트
 ├── stop.sh              # 종료 스크립트
+├── .env                 # Jira 인증 정보
 ├── data/
 │   ├── config.json      # 설정
-│   └── registry.json    # 프로젝트 목록
+│   └── jira-config.json # Jira 연동 설정
 ├── skills/              # 글로벌 스킬
 │   ├── feature.md
 │   ├── bugfix.md
 │   └── ...
-├── daemon/              # 데몬 소스
-└── web/                 # Web UI 소스
+└── daemon/              # 데몬 소스
 ```
 
 ### 프로젝트별
@@ -120,9 +108,6 @@ Next.js 14 App Router 기반 대시보드.
 ```
 project/
 ├── .claude/
-│   ├── tasks/
-│   │   ├── queue.json   # 태스크 큐
-│   │   └── archive/     # 완료된 태스크 아카이브
 │   └── logs/
 │       └── {task-id}/
 │           ├── prompt.txt    # 실행 프롬프트
@@ -140,6 +125,25 @@ project/
     ├── skills/          # 프로젝트별 스킬
     └── CHANGELOG.md     # 메인 변경 로그
 ```
+
+## Jira 설정
+
+### 커스텀 필드
+
+| 필드명 | 타입 | 용도 |
+|--------|------|------|
+| prompt | Text (multi-line) | Claude에게 전달할 작업 내용 |
+| skill | Select | 사용할 스킬 선택 |
+| projectPath | Text | 대상 프로젝트 경로 (기본값 사용 가능) |
+
+### 워크플로우 상태
+
+| 상태 | 설명 |
+|------|------|
+| To claude | 데몬이 감지하는 트리거 상태 |
+| In Progress | 실행 중 |
+| In review | 완료, 리뷰 대기 |
+| Done | 최종 완료 |
 
 ## 확장성
 

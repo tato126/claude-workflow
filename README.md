@@ -1,114 +1,109 @@
 # Claude Workflow Automation
 
-Claude Code를 활용한 자동화 워크플로우 시스템. 태스크 큐 기반으로 개발 작업을 자동 실행하고 검증합니다.
+Jira Cloud와 Claude Code를 연동한 태스크 자동화 시스템. Jira 이슈를 자동으로 감지하여 Claude Code로 실행하고 결과를 Jira에 업데이트합니다.
 
 ## 구성 요소
 
 ```
 ~/.claude/workflow/
-├── daemon/          # 백그라운드 태스크 실행기
-├── web/             # Next.js 대시보드 UI
+├── daemon/          # Jira 연동 데몬 (polling + 실행)
 ├── cli/             # 커맨드라인 도구
-├── skills/          # 글로벌 스킬 정의
-├── data/            # 설정 및 레지스트리
+├── skills/          # 스킬 정의
+├── data/            # 설정 파일
 └── docs/            # 문서
+```
+
+## 동작 흐름
+
+```
+Jira 이슈 생성 (To claude)
+        │
+        ▼ polling (10s)
+   Daemon 감지
+        │
+        ▼
+  Claude Code 실행
+        │
+        ▼
+   자동 검증 (build/test)
+        │
+        ▼
+  Jira 상태 업데이트 + 댓글
 ```
 
 ## 빠른 시작
 
-### 1. 데몬 시작
+### 1. 환경 설정
+
+```bash
+cp .env.example .env
+# .env 파일 편집 - Jira 인증 정보 입력
+
+cp data/jira-config.example.json data/jira-config.json
+# jira-config.json 편집 - Jira 프로젝트 설정
+```
+
+### 2. 의존성 설치 및 빌드
+
+```bash
+cd daemon
+npm install
+npm run build
+```
+
+### 3. 데몬 시작
 
 ```bash
 ~/.claude/workflow/start.sh
 ```
 
-### 2. Web UI 실행
+### 4. Jira에서 이슈 생성
 
-```bash
-cd ~/.claude/workflow/web
-npm run dev
-```
+- 상태를 "To claude"로 설정
+- 프롬프트 필드에 작업 내용 입력
+- 데몬이 자동으로 감지하여 실행
 
-http://localhost:3000 에서 대시보드 접근
+## Jira 설정
 
-### 3. 프로젝트 등록
+### 필요한 커스텀 필드
 
-Web UI에서 "프로젝트 추가" 또는:
+| 필드명 | 용도 |
+|--------|------|
+| prompt | Claude에게 전달할 작업 내용 |
+| skill | 사용할 스킬 (선택) |
+| projectPath | 대상 프로젝트 경로 (선택) |
 
-```bash
-# data/registry.json에 직접 추가
-{
-  "projects": [
-    { "name": "my-project", "path": "/path/to/project", "addedAt": "..." }
-  ]
-}
-```
-
-### 4. 태스크 생성
-
-Web UI에서 태스크 생성:
-- 프롬프트 입력
-- 타입 선택 (feature, bugfix, refactor, test, docs, design, api)
-- 스킬 선택 (선택사항)
-
-## 태스크 워크플로우
+### 워크플로우 상태
 
 ```
-[todo] → [progress] → [review] → [done]
-                  ↓
-              [failed]
+To claude → In Progress → In review → Done
+                              ↓
+                           (failed)
 ```
-
-1. **todo**: 대기 중
-2. **progress**: 실행 중 (Claude Code)
-3. **review**: 검증 완료, 리뷰 대기
-4. **done**: 완료
-5. **failed**: 실패 (재시도 초과)
 
 ## 자동 검증
 
-프로젝트 타입에 따라 자동으로 검증 수행:
+프로젝트 타입에 따라 자동 실행:
 
 | 프로젝트 | 감지 파일 | 빌드 | 테스트 |
 |---------|----------|------|--------|
 | Node.js | package.json | npm run build | npm test |
 | Java/Gradle | build.gradle | ./gradlew build | ./gradlew test |
 | Java/Maven | pom.xml | mvn package | mvn test |
-| Python | pytest.ini/pyproject.toml | - | pytest |
+| Python | pytest.ini | - | pytest |
 | Go | go.mod | go build | go test |
-| Rust | Cargo.toml | cargo build | cargo test |
-| C/C++ | Makefile | make | make test |
-
-모든 태스크에 Codex 리뷰 자동 실행.
-
-## 문서 자동화
-
-태스크 완료 시 `project/docs/`에 자동 생성:
-
-```
-project/docs/
-├── daily/           # 일별 작업 내용
-├── changes/         # 일별 변경 파일 목록
-├── tasks/           # 성공한 태스크 상세
-├── failed/          # 실패한 태스크 상세
-├── design/          # 설계 문서 (design 타입)
-├── features/        # 기능 문서 (feature 타입)
-├── bugs/            # 버그 문서 (bugfix 타입)
-└── CHANGELOG.md     # 메인 변경 로그
-```
-
-## 실시간 로그
-
-태스크 실행 중 Web UI에서 실시간 로그 확인:
-- 태스크 상세 모달 → "실시간" 탭
-- 2초 간격 자동 갱신
 
 ## 스킬 시스템
 
-스킬은 태스크 실행 시 Claude에게 전달되는 지침:
-
 ```
 ~/.claude/workflow/skills/    # 글로벌 스킬
+├── tdd.md                    # TDD 방식 개발
+├── code-review.md            # 코드 리뷰
+├── bugfix.md                 # 버그 수정
+├── feature.md                # 기능 개발
+├── refactor.md               # 리팩토링
+└── ...
+
 project/docs/skills/          # 프로젝트별 스킬 (우선)
 ```
 
