@@ -1,0 +1,24 @@
+{
+  "enabled": true,
+  "baseUrl": "https://your-domain.atlassian.net",
+  "projectKey": "YOUR_PROJECT_KEY",
+  "pollInterval": 10000,
+  "defaultProjectPath": "/path/to/your/project",
+  "statuses": {
+    "trigger": "To claude",
+    "processing": "In Progress",
+    "review": "In review",
+    "done": "Done",
+    "failed": "In review"
+  },
+  "customFields": {
+    "skill": "customfield_XXXXX",
+    "prompt": "customfield_XXXXX",
+    "projectPath": "customfield_XXXXX"
+  },
+  "confluence": {
+    "spaceKey": "YOUR_SPACE_KEY",
+    "spaceId": "YOUR_SPACE_ID",
+    "parentPageId": "YOUR_PARENT_PAGE_ID"
+  }
+}

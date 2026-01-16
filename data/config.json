@@ -1,0 +1,24 @@
+{
+  "daemon": {
+    "pollInterval": 5000,
+    "maxConcurrent": 1,
+    "autoStart": true
+  },
+  "defaults": {
+    "validation": ["test", "lint"],
+    "retryMax": 3
+  },
+  "review": {
+    "enabled": true,
+    "autoApprove": false,
+    "requireComment": false
+  },
+  "notifications": {
+    "enabled": true,
+    "methods": ["macos"],
+    "sound": true
+  },
+  "claudeCode": {
+    "flags": ["--print", "--dangerously-skip-permissions"]
+  }
+}
