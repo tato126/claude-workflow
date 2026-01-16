@@ -110,6 +110,5 @@ project/docs/skills/          # 프로젝트별 스킬 (우선)
 ## 추가 문서
 
 - [아키텍처](docs/architecture.md)
-- [API 문서](docs/api.md)
 - [설정 가이드](docs/configuration.md)
 - [스킬 가이드](docs/skills.md)
